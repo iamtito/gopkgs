@@ -29,6 +29,7 @@ type AwsInterface interface {
 type AWS struct {
 	Session        *session.Session
 	SecretsManager *secretsmanager.SecretsManager
+	SQS            *sqs.SQS
 }
 
 func ConstructAWS() AwsInterface {
@@ -37,6 +38,7 @@ func ConstructAWS() AwsInterface {
 	return AWS{
 		Session:        sess,
 		SecretsManager: secretsmanager.New(sess),
+		SQS:            sqs.New(sess),
 	}
 }
 
