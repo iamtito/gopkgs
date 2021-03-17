@@ -1,21 +1,15 @@
 package shared
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
-	"github.com/aws/aws-sdk-go/service/sqs"
 )
 
 //AwsResources is an interface that describes AWS interactions
