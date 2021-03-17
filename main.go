@@ -86,3 +86,19 @@ func (a AWS) GrabSecret(secretName string) (map[string]string, error) {
 
 	return config, nil
 }
+
+func (a AWS) SetSecretToEnvironmentVariables(secretName string) error {
+	config, err := a.GrabSecret(secretName)
+
+	if err != nil {
+		return err
+	}
+
+	for key, value := range config {
+		if err := os.Setenv(key, value); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
