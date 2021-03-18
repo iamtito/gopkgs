@@ -1,16 +1,19 @@
 package shared
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/aws/aws-sdk-go/service/sqs"
 )
@@ -23,6 +26,7 @@ type AwsInterface interface {
 	GetQueueUrl(v string) string
 	SendStringMessageToSqs(payload string, qURL string) (*string, error)
 	SendStringMessageWithAttributesToSqs(payload string, qURL string, attributes map[string]interface{}) (*string, error)
+	UploadFileToS3(path string, bucketName string, destinationName string, contentType string) error
 }
 
 //AWS is a wrapper for a real aws sdk session.
@@ -30,6 +34,7 @@ type AWS struct {
 	Session        *session.Session
 	SecretsManager *secretsmanager.SecretsManager
 	SQS            *sqs.SQS
+	S3             *s3.S3
 }
 
 func ConstructAWS() AwsInterface {
@@ -39,64 +44,22 @@ func ConstructAWS() AwsInterface {
 		Session:        sess,
 		SecretsManager: secretsmanager.New(sess),
 		SQS:            sqs.New(sess),
+		S3:             s3.New(sess),
 	}
 }
 
 func (a AWS) GetSecret(secretName string) (map[string]string, error) {
 	config := make(map[string]string)
-	// secretName := "/deployment/qalort/staging"
-	// region := "us-east-1"
-	/// Incoming changes
 	// Create a context so that the request will timeout before the Lambda does.
 	ctx := context.Background()
 	ctx, cancelFn := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelFn()
-
-	/////// Incoming ends
-
-	// //Create a Secrets Manager client
-	// svc := secretsmanager.New(session.New(),
-	// 	aws.NewConfig().WithRegion(region))
 
 	input := &secretsmanager.GetSecretValueInput{
 		SecretId:     aws.String(secretName),
 		VersionStage: aws.String("AWSCURRENT"), // VersionStage defaults to AWSCURRENT if unspecified
 	}
 
-	// In this sample we only handle the specific exceptions for the 'GetSecretValue' API.
-	// See https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
-
-	// result, err := svc.GetSecretValue(input)
-	// if err != nil {
-	// 	if aerr, ok := err.(awserr.Error); ok {
-	// 		switch aerr.Code() {
-	// 		case secretsmanager.ErrCodeDecryptionFailure:
-	// 			// Secrets Manager can't decrypt the protected secret text using the provided KMS key.
-	// 			fmt.Println(secretsmanager.ErrCodeDecryptionFailure, aerr.Error())
-
-	// 		case secretsmanager.ErrCodeInternalServiceError:
-	// 			// An error occurred on the server side.
-	// 			fmt.Println(secretsmanager.ErrCodeInternalServiceError, aerr.Error())
-
-	// 		case secretsmanager.ErrCodeInvalidParameterException:
-	// 			// You provided an invalid value for a parameter.
-	// 			fmt.Println(secretsmanager.ErrCodeInvalidParameterException, aerr.Error())
-
-	// 		case secretsmanager.ErrCodeInvalidRequestException:
-	// 			// You provided a parameter value that is not valid for the current state of the resource.
-	// 			fmt.Println(secretsmanager.ErrCodeInvalidRequestException, aerr.Error())
-
-	// 		case secretsmanager.ErrCodeResourceNotFoundException:
-	// 			// We can't find the resource that you asked for.
-	// 			fmt.Println(secretsmanager.ErrCodeResourceNotFoundException, aerr.Error())
-	// 		}
-	// 	} else {
-	// 		// Print the error, cast err to awserr.Error to get the Code and
-	// 		// Message from an error.
-	// 		fmt.Println(err.Error())
-	// 	}
-	// 	// return nil
-	// }
 	// Grab the secret
 	result, err := a.SecretsManager.GetSecretValueWithContext(ctx, input)
 
@@ -243,4 +206,47 @@ func (a AWS) SendStringMessageWithAttributesToSqs(payload string, qURL string, a
 	}
 
 	return result.MessageId, err
+}
+
+//UploadFileToS3 Upload a file to S3
+func (a AWS) UploadFileToS3(path string, bucketName string, destinationName string, contentType string) error {
+	file, err := os.Open(path)
+
+	if err != nil {
+		return err
+	}
+
+	defer file.Close()
+
+	// Get the file metadata
+	fileInfo, _ := file.Stat()
+	var size = fileInfo.Size()
+	buffer := make([]byte, size)
+	file.Read(buffer)
+
+	// Clean up the bucket name
+	cleanedUpBucketName := bucketName
+
+	if strings.Contains(cleanedUpBucketName, ":") {
+		bucketParts := strings.Split(cleanedUpBucketName, ":")
+		cleanedUpBucketName = bucketParts[len(bucketParts)-1]
+	}
+
+	// Create a context so that the request will timeout before the Lambda does.
+	ctx := context.Background()
+	ctx, cancelFn := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelFn()
+
+	_, err = a.S3.PutObjectWithContext(ctx, &s3.PutObjectInput{
+		Bucket:               aws.String(cleanedUpBucketName),
+		Key:                  aws.String(destinationName),
+		ACL:                  aws.String("private"),
+		Body:                 bytes.NewReader(buffer),
+		ContentLength:        aws.Int64(size),
+		ContentType:          aws.String(contentType),
+		ContentDisposition:   aws.String("attachment"),
+		ServerSideEncryption: aws.String("AES256"),
+	})
+
+	return err
 }
